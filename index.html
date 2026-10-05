@@ -42,6 +42,12 @@
   .th button{ position:absolute; top:3px; right:3px; width:24px; height:24px; border-radius:50%; border:none;
     background:rgba(0,0,0,.6); color:#fff; font-size:15px; line-height:24px; padding:0; }
   .count{ font-size:13px; color:var(--muted); }
+  .th .st{ position:absolute; left:3px; bottom:3px; min-width:22px; height:22px; border-radius:11px; padding:0 6px;
+    font-size:12px; line-height:22px; text-align:center; color:#fff; background:rgba(0,0,0,.6); }
+  .th .st.ok{ background:var(--tone); }
+  .th .st.err{ background:var(--danger); }
+  .locked{ opacity:.55; pointer-events:none; }
+  .hint{ font-size:12px; color:var(--muted); }
   footer{ position:fixed; left:0; right:0; bottom:0; background:var(--card); border-top:1px solid var(--line);
     padding:10px 14px; padding-bottom:calc(10px + env(safe-area-inset-bottom)); }
   #msg{ font-size:13px; min-height:18px; margin-bottom:6px; color:var(--muted); }
@@ -77,6 +83,7 @@
   <section class="card">
     <div class="lbl">เลขที่เอกสาร</div>
     <input id="docNo" type="text" placeholder="เช่น PO690412" autocomplete="off" autocapitalize="characters">
+    <div class="hint" id="lockHint" hidden>ล็อกชื่อและเลขที่แล้ว เพราะเริ่มอัปรูป — ถ้าจะแก้ ให้ลบรูปออกให้หมดก่อน</div>
   </section>
 
   <section class="card">
@@ -123,8 +130,10 @@ const VIEWER_URL = '';                          // ลิงก์ App ดูร
 const STAFF = ['คุณหนึ่ง','คุณทรง','คุณเปา','คุณมายด์','คุณต๊อบ','คุณบอล','คุณซอ'];
 /* ================================================== */
 
-const S = { type:'receive', staff:'', product:[], document:[], last:null, lat:'', lng:'' };
-let pickKind = 'product';
+const S = { type:'receive', staff:'', product:[], document:[], counter:{product:0, document:0},
+            jobISO:'', last:null, lat:'', lng:'' };
+let pickKind = 'product', active = 0;
+const MAX_PARALLEL = 2, queue = [];
 
 /* ---------- เริ่มต้น ---------- */
 (function init(){
@@ -144,6 +153,7 @@ let pickKind = 'product';
 })();
 
 function setType(t){
+  if (hasPhotos()) return;
   S.type = t;
   document.body.classList.toggle('issue', t === 'issue');
   document.getElementById('title').textContent = t === 'issue' ? 'ขาจ่าย · จ่ายสินค้าออก' : 'ขารับ · รับสินค้าเข้า';
@@ -161,14 +171,32 @@ function renderStaff(){
   });
 }
 
+const docNoVal = () => document.getElementById('docNo').value.trim().toUpperCase();
+const hasPhotos = () => S.product.length + S.document.length > 0;
+
+function setLock(){
+  const on = hasPhotos();
+  ['staffChips','docNo'].forEach(id => document.getElementById(id).classList.toggle('locked', on));
+  document.querySelector('.seg').classList.toggle('locked', on);
+  document.getElementById('lockHint').hidden = !on;
+}
+
 /* ---------- ถ่าย / เลือกรูป ---------- */
 function pick(kind, camera){
+  if (!S.staff)     return msg('เลือกชื่อพนักงานก่อนถ่ายรูป', true);
+  if (!docNoVal())  return msg('กรอกเลขที่เอกสารก่อนถ่ายรูป', true);
   pickKind = kind;
   document.getElementById(camera ? 'fileCam' : 'fileLib').click();
 }
 ['fileCam','fileLib'].forEach(id => document.getElementById(id).addEventListener('change', e => {
-  [...e.target.files].forEach(f => S[pickKind].push({ file:f, url:URL.createObjectURL(f) }));
-  e.target.value = ''; renderThumbs(pickKind);
+  if (!S.jobISO) S.jobISO = new Date().toISOString();       // เวลาเริ่มงาน = ใช้กำหนดโฟลเดอร์วันที่
+  [...e.target.files].forEach(f => {
+    const it = { kind: pickKind, index: ++S.counter[pickKind], url: URL.createObjectURL(f),
+                 shot: new Date(f.lastModified || Date.now()), status: 'wait', fileId: '' };
+    if (id === 'fileCam') it.shot = new Date();
+    S[pickKind].push(it); queue.push(it);
+  });
+  e.target.value = ''; renderThumbs(pickKind); setLock(); pump();
 }));
 
 function renderThumbs(kind){
@@ -176,14 +204,68 @@ function renderThumbs(kind){
   const box = document.getElementById('th' + key); box.innerHTML = '';
   S[kind].forEach((it, i) => {
     const d = document.createElement('div'); d.className = 'th';
-    d.innerHTML = '<img src="' + it.url + '"><button aria-label="ลบ">×</button>';
-    d.querySelector('button').onclick = () => { URL.revokeObjectURL(it.url); S[kind].splice(i,1); renderThumbs(kind); };
+    const st = it.status === 'ok' ? '<span class="st ok">✓</span>'
+             : it.status === 'err' ? '<span class="st err">ลองใหม่</span>'
+             : '<span class="st">…</span>';
+    d.innerHTML = '<img src="' + it.url + '">' + st + '<button aria-label="ลบ">×</button>';
+    d.querySelector('button').onclick = ev => { ev.stopPropagation(); removePhoto(kind, i); };
+    if (it.status === 'err') d.querySelector('.st').onclick = () => { it.status = 'wait'; queue.push(it); renderThumbs(kind); pump(); };
     box.appendChild(d);
   });
   document.getElementById('cnt' + key).textContent = S[kind].length ? '(' + S[kind].length + ' รูป)' : '';
+  updateMsg();
 }
 
-/* ---------- ย่อรูป + ลายน้ำ (สูตรเดียวกับ app เดิม) ---------- */
+function removePhoto(kind, i){
+  const it = S[kind][i]; it.removed = true;
+  if (it.fileId) post({ action:'remove', fileId: it.fileId }).catch(()=>{});
+  URL.revokeObjectURL(it.url); S[kind].splice(i, 1);
+  if (!hasPhotos()) S.jobISO = '';
+  renderThumbs(kind); setLock();
+}
+
+/* ---------- อัปโหลดเบื้องหลัง (ทีละ 2 รูปพร้อมกัน) ---------- */
+function post(obj){
+  obj.accessToken = liff.getAccessToken();
+  return fetch(GAS_URL, { method:'POST', body: JSON.stringify(obj) }).then(r => r.json());
+}
+function pump(){
+  while (active < MAX_PARALLEL && queue.length){
+    const it = queue.shift(); if (it.removed) continue;
+    active++; it.status = 'up'; uploadOne(it).finally(() => { active--; pump(); });
+  }
+}
+async function uploadOne(it){
+  try{
+    const mode = S.type === 'receive' ? 'รับสินค้า' : 'จ่ายสินค้า';
+    const role = it.kind === 'product' ? 'สินค้า' : 'เอกสาร';
+    const text = role + ' · ' + mode + '\nพนักงาน: ' + S.staff + '\nเลขที่: ' + docNoVal() + '\nถ่ายเมื่อ: ' + fmt(it.shot);
+    const dataUrl = await processImage(it.url, it.kind === 'product' ? 1280 : 1600, text);
+    const res = await post({ action:'upload', type:S.type, staff:S.staff, docNo:docNoVal(), jobISO:S.jobISO,
+                             kind:it.kind, index:it.index, shotISO:it.shot.toISOString(), lat:S.lat, lng:S.lng, dataUrl });
+    if (!res.ok) throw new Error(res.message);
+    it.fileId = res.fileId; it.status = 'ok'; S.folderUrl = res.folderUrl;
+    if (it.removed) post({ action:'remove', fileId: it.fileId }).catch(()=>{});
+  }catch(e){
+    it.status = 'err'; it.error = e.message;
+  }
+  renderThumbs(it.kind);
+}
+function pending(){ return [...S.product, ...S.document].filter(it => it.status === 'wait' || it.status === 'up').length; }
+function failed(){ return [...S.product, ...S.document].filter(it => it.status === 'err').length; }
+function updateMsg(){
+  if (document.getElementById('done').classList.contains('show')) return;
+  const p = pending(), f = failed();
+  if (p) msg('กำลังอัปโหลดเบื้องหลัง… เหลือ ' + p + ' รูป');
+  else if (f) msg('อัปโหลดไม่สำเร็จ ' + f + ' รูป — แตะ "ลองใหม่" ที่รูป', true);
+  else if (hasPhotos()) msg('อัปโหลดครบแล้ว กดบันทึกได้เลย');
+}
+
+/* ---------- วันเวลา dd/MM/yyyy HH:mm:ss ---------- */
+function fmt(d){ const z = n => String(n).padStart(2,'0');
+  return z(d.getDate()) + '/' + z(d.getMonth()+1) + '/' + d.getFullYear() + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds()); }
+
+/* ---------- ย่อรูป + ลายน้ำ ---------- */
 function loadImg(url){ return new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; }); }
 async function processImage(url, maxSide, text){
   const img = await loadImg(url);
@@ -191,49 +273,38 @@ async function processImage(url, maxSide, text){
   const w = r > 1 ? Math.round(img.width / r) : img.width, h = r > 1 ? Math.round(img.height / r) : img.height;
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
-  ctx.save(); ctx.globalAlpha = .75;
-  const pad = Math.round(h * .02), fs = Math.max(12, Math.round(h * .03));
-  ctx.font = fs + 'px system-ui, -apple-system, "Noto Sans Thai", sans-serif';
-  const lines = text.split('\n'); let y = h - pad - (lines.length - 1) * (fs + 4);
-  lines.forEach(line => {
-    const tw = ctx.measureText(line).width, x = w - pad - tw;
-    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(x - 6, y - fs - 4, tw + 12, fs + 10);
-    ctx.fillStyle = '#fff'; ctx.fillText(line, x, y); y += fs + 6;
-  });
-  ctx.restore();
+  const pad = Math.round(Math.min(w, h) * .02), fs = Math.max(14, Math.round(Math.min(w, h) * .035));
+  ctx.font = 'bold ' + fs + 'px system-ui, -apple-system, "Noto Sans Thai", sans-serif';
+  ctx.textBaseline = 'alphabetic';
+  const lines = text.split('\n'), lh = Math.round(fs * 1.35);
+  const boxW = Math.max(...lines.map(l => ctx.measureText(l).width)) + fs;
+  const boxH = lines.length * lh + Math.round(fs * .5);
+  const x0 = w - pad - boxW, y0 = h - pad - boxH;
+  ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x0, y0, boxW, boxH);
+  ctx.fillStyle = '#fff';
+  lines.forEach((l, i) => ctx.fillText(l, x0 + fs / 2, y0 + (i + 1) * lh));
   return c.toDataURL('image/jpeg', .82);
 }
 
-/* ---------- บันทึก ---------- */
+/* ---------- บันทึก (รูปขึ้นไปแล้ว เหลือเขียน Sheet) ---------- */
 async function submitAll(){
-  const docNo = document.getElementById('docNo').value.trim().toUpperCase();
+  const docNo = docNoVal();
   if (!S.staff) return msg('กรุณาเลือกพนักงาน', true);
   if (!docNo)   return msg('กรุณากรอกเลขที่เอกสาร', true);
-  if (!S.product.length && !S.document.length) return msg('กรุณาถ่ายรูปอย่างน้อย 1 รูป', true);
+  if (!hasPhotos()) return msg('กรุณาถ่ายรูปอย่างน้อย 1 รูป', true);
+  if (failed()) return msg('มีรูปอัปโหลดไม่สำเร็จ แตะ "ลองใหม่" ที่รูป หรือลบรูปนั้นก่อน', true);
 
   const btn = document.getElementById('btnSend'); btn.disabled = true;
   try{
+    while (pending()){ msg('รออัปโหลดอีก ' + pending() + ' รูป…'); await new Promise(r => setTimeout(r, 400)); }
+    if (failed()) throw new Error('มีรูปอัปโหลดไม่สำเร็จ');
+    msg('กำลังบันทึก…');
     const now = new Date();
-    const mode = S.type === 'receive' ? 'รับสินค้า' : 'จ่ายสินค้า';
-    const base = mode + '\nพนักงาน: ' + S.staff + '\nเลขที่: ' + docNo + '\nเวลา(เครื่อง): ' + now.toLocaleString('th-TH');
-    const images = [];
-    let n = 0, total = S.product.length + S.document.length;
-    for (const it of S.product){ msg('กำลังเตรียมรูป ' + (++n) + '/' + total);
-      images.push({ label:'product_' + n, dataUrl: await processImage(it.url, 1280, 'สินค้า\n' + base) }); }
-    for (const it of S.document){ msg('กำลังเตรียมรูป ' + (++n) + '/' + total);
-      images.push({ label:'document_' + n, dataUrl: await processImage(it.url, 1600, 'เอกสาร\n' + base) }); }
-
-    msg('กำลังอัปโหลด ' + total + ' รูป…');
-    const payload = { type:S.type, staff:S.staff, docNo, lat:S.lat, lng:S.lng, deviceTimeISO: now.toISOString(), images };
-    const res = await fetch(GAS_URL, { method:'POST',
-      body: JSON.stringify({ action:'save', accessToken: liff.getAccessToken(), payload }) }).then(r => r.json());
+    const res = await post({ action:'finalize', type:S.type, staff:S.staff, docNo, jobISO:S.jobISO, saveISO: now.toISOString() });
     if (!res.ok) throw new Error(res.message || 'บันทึกไม่สำเร็จ');
 
     S.last = { type:S.type, staff:S.staff, docNo, time: now, nProduct:S.product.length, nDocument:S.document.length, folderUrl: res.folderUrl };
-
-    // บันทึกในกลุ่มคลัง (ห้องที่เปิดหน้านี้มา) — ฟรี
     try{ if (liff.getContext() && liff.getContext().type !== 'none') await liff.sendMessages([buildCard(S.last)]); }catch(e){}
-
     showDone();
     await shareToTeam();
   }catch(e){
@@ -279,9 +350,9 @@ function showDone(){
   document.getElementById('done').classList.add('show');
 }
 function newJob(){
-  ['product','document'].forEach(k => { S[k].forEach(it => URL.revokeObjectURL(it.url)); S[k] = []; renderThumbs(k); });
-  document.getElementById('docNo').value = ''; S.last = null;
-  document.getElementById('done').classList.remove('show');
+  ['product','document'].forEach(k => { S[k].forEach(it => URL.revokeObjectURL(it.url)); S[k] = []; S.counter[k] = 0; renderThumbs(k); });
+  document.getElementById('docNo').value = ''; S.last = null; S.jobISO = '';
+  document.getElementById('done').classList.remove('show'); setLock();
   document.getElementById('btnSend').disabled = false; msg('พร้อมใช้งาน');
 }
 function msg(t, err){ const m = document.getElementById('msg'); m.textContent = t; m.className = err ? 'err' : ''; }
