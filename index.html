@@ -126,17 +126,17 @@
 /* ===================== ตั้งค่า ===================== */
 const LIFF_ID    = '2011868026-qtnGsHFa';   // จาก LINE Login channel > LIFF
 const GAS_URL    = 'https://script.google.com/macros/s/AKfycbxY4W5Bx1qOMlh__TRxDPcxKUfmpO5mXe7V7nSuT2xr7yQ3bfQ4ndVUncgocqJDH7M2mA/exec';
-const VIEWER_URL = '';                          // ลิงก์ App ดูรูป (เว้นว่าง = ปุ่ม "ดูรูป" เปิดโฟลเดอร์ Drive แทน)
+const VIEWER_URL = 'https://script.google.com/macros/s/AKfycbzGBnkLNrbvqCO077-HTW7-do_ivXpE45ziJEfwxPc3tsz8N8wbexVYNIB9Ql_mpcU/exec';                          // ลิงก์ App ดูรูป (เว้นว่าง = ปุ่ม "ดูรูป" เปิดโฟลเดอร์ Drive แทน)
 const STAFF = ['คุณหนึ่ง','คุณทรง','คุณเปา','คุณมายด์','คุณต๊อบ','คุณบอล','คุณซอ'];
 /* ================================================== */
 
-const S = { type:'receive', staff:'', product:[], document:[], counter:{product:0, document:0},
+var S = { type:'receive', staff:'', product:[], document:[], counter:{product:0, document:0},
             jobISO:'', last:null, lat:'', lng:'' };
 let pickKind = 'product', active = 0;
 const MAX_PARALLEL = 2, queue = [];
 
 /* ---------- เริ่มต้น ---------- */
-(function init(){
+function init(){
   const qs = new URLSearchParams(location.search);
   setType(qs.get('type') === 'issue' ? 'issue' : 'receive');
   try{ S.staff = localStorage.getItem('wh_staff') || ''; }catch(e){}
@@ -150,7 +150,7 @@ const MAX_PARALLEL = 2, queue = [];
       msg('พร้อมใช้งาน'); document.getElementById('btnSend').disabled = false;
     })
     .catch(e => msg('เชื่อมต่อ LINE ไม่สำเร็จ: ' + e.message, true));
-})();
+}
 
 function setType(t){
   if (hasPhotos()) return;
@@ -171,8 +171,8 @@ function renderStaff(){
   });
 }
 
-const docNoVal = () => document.getElementById('docNo').value.trim().toUpperCase();
-const hasPhotos = () => S.product.length + S.document.length > 0;
+function docNoVal(){ return document.getElementById('docNo').value.trim().toUpperCase(); }
+function hasPhotos(){ return S.product.length + S.document.length > 0; }
 
 function setLock(){
   const on = hasPhotos();
@@ -355,6 +355,7 @@ function newJob(){
   document.getElementById('done').classList.remove('show'); setLock();
   document.getElementById('btnSend').disabled = false; msg('พร้อมใช้งาน');
 }
+window.addEventListener('DOMContentLoaded', init);
 function msg(t, err){ const m = document.getElementById('msg'); m.textContent = t; m.className = err ? 'err' : ''; }
 </script>
 </body>
