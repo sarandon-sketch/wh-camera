@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ถ่ายรูป รับ-จ่าย</title>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+
+  :root{
+    --bg:#f3f5f4; --card:#fff; --ink:#17201a; --muted:#66746b; --line:#dfe5e1;
+    --tone:#06c755; --tone-soft:#e4f7eb; --danger:#c62828;
+  }
+  body.issue{ --tone:#2563eb; --tone-soft:#e6eefc; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.5 system-ui,-apple-system,"Noto Sans Thai","Segoe UI",sans-serif; }
+  header{ background:var(--tone); color:#fff; padding:14px 16px 12px; padding-top:calc(14px + env(safe-area-inset-top)); }
+  header h1{ margin:0; font-size:19px; }
+  .seg{ display:flex; gap:6px; margin-top:10px; }
+  .seg button{ flex:1; border:1.5px solid rgba(255,255,255,.7); background:transparent; color:#fff;
+    border-radius:10px; padding:7px; font:inherit; font-weight:600; }
+  .seg button.on{ background:#fff; color:var(--tone); border-color:#fff; }
+  main{ padding:12px 14px 110px; display:flex; flex-direction:column; gap:12px; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:10px; }
+  .lbl{ font-size:13px; color:var(--muted); font-weight:600; }
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; }
+  .chip{ border:1.5px solid var(--line); background:#fff; border-radius:99px; padding:8px 14px; font:inherit; font-weight:600; color:var(--ink); }
+  .chip.on{ background:var(--tone); border-color:var(--tone); color:#fff; }
+  input[type=text]{ width:100%; border:1.5px solid var(--line); border-radius:10px; padding:12px; font:inherit; font-size:18px;
+    letter-spacing:.03em; text-transform:uppercase; background:#fff; color:var(--ink); }
+  input[type=text]:focus{ outline:none; border-color:var(--tone); }
+  input[type=file]{ display:none; }
+  .row2{ display:grid; grid-template-columns:2fr 1fr; gap:8px; }
+  .btn{ border:none; border-radius:12px; padding:13px 10px; font:inherit; font-weight:700; }
+  .btn.cam{ background:var(--tone); color:#fff; }
+  .btn.pick{ background:var(--tone-soft); color:var(--tone); }
+  .thumbs{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+  .thumbs:empty{ display:none; }
+  .th{ position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; background:var(--line); }
+  .th img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .th button{ position:absolute; top:3px; right:3px; width:24px; height:24px; border-radius:50%; border:none;
+    background:rgba(0,0,0,.6); color:#fff; font-size:15px; line-height:24px; padding:0; }
+  .count{ font-size:13px; color:var(--muted); }
+  footer{ position:fixed; left:0; right:0; bottom:0; background:var(--card); border-top:1px solid var(--line);
+    padding:10px 14px; padding-bottom:calc(10px + env(safe-area-inset-bottom)); }
+  #msg{ font-size:13px; min-height:18px; margin-bottom:6px; color:var(--muted); }
+  #msg.err{ color:var(--danger); }
+  .btn.send{ width:100%; background:var(--tone); color:#fff; font-size:17px; padding:15px; }
+  .btn.send:disabled{ opacity:.5; }
+  /* หน้าเสร็จ */
+  #done{ position:fixed; inset:0; background:var(--bg); display:none; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; padding:24px; text-align:center; }
+  #done.show{ display:flex; }
+  #done .ok{ width:72px; height:72px; border-radius:50%; background:var(--tone); color:#fff; font-size:38px; display:grid; place-items:center; }
+  #done h2{ margin:0; font-size:20px; }
+  #done p{ margin:0; color:var(--muted); }
+  #done .btn{ width:100%; max-width:320px; }
+  .btn.ghost{ background:transparent; color:var(--muted); border:1.5px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">ขารับ · รับสินค้าเข้า</h1>
+  <div class="seg">
+    <button id="tReceive" onclick="setType('receive')">ขารับ</button>
+    <button id="tIssue" onclick="setType('issue')">ขาจ่าย</button>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="lbl">พนักงาน</div>
+    <div class="chips" id="staffChips"></div>
+  </section>
+
+  <section class="card">
+    <div class="lbl">เลขที่เอกสาร</div>
+    <input id="docNo" type="text" placeholder="เช่น PO690412" autocomplete="off" autocapitalize="characters">
+  </section>
+
+  <section class="card">
+    <div class="lbl">รูปสินค้า <span class="count" id="cntProduct"></span></div>
+    <div class="row2">
+      <button class="btn cam" onclick="pick('product',true)">ถ่ายรูปสินค้า</button>
+      <button class="btn pick" onclick="pick('product',false)">เลือกจากคลัง</button>
+    </div>
+    <div class="thumbs" id="thProduct"></div>
+  </section>
+
+  <section class="card">
+    <div class="lbl">รูปเอกสาร <span class="count" id="cntDocument"></span></div>
+    <div class="row2">
+      <button class="btn cam" onclick="pick('document',true)">ถ่ายรูปเอกสาร</button>
+      <button class="btn pick" onclick="pick('document',false)">เลือกจากคลัง</button>
+    </div>
+    <div class="thumbs" id="thDocument"></div>
+  </section>
+</main>
+
+<footer>
+  <div id="msg">กำลังเชื่อมต่อ LINE…</div>
+  <button class="btn send" id="btnSend" onclick="submitAll()" disabled>บันทึกและส่งแจ้ง</button>
+</footer>
+
+<div id="done">
+  <div class="ok">✓</div>
+  <h2 id="doneTitle">บันทึกเรียบร้อย</h2>
+  <p id="doneText"></p>
+  <button class="btn send" onclick="shareToTeam()">ส่งแจ้งไปกลุ่มจัดซื้อ/ขาย</button>
+  <button class="btn ghost" onclick="newJob()">ถ่ายรายการใหม่</button>
+  <button class="btn ghost" onclick="liff.closeWindow()">ปิด</button>
+</div>
+
+<input id="fileCam" type="file" accept="image/*" capture="environment">
+<input id="fileLib" type="file" accept="image/*" multiple>
+
+<script>
+/* ===================== ตั้งค่า ===================== */
+const LIFF_ID    = '2011868026-qtnGsHFa';   // จาก LINE Login channel > LIFF
+const GAS_URL    = 'https://script.google.com/macros/s/AKfycbxY4W5Bx1qOMlh__TRxDPcxKUfmpO5mXe7V7nSuT2xr7yQ3bfQ4ndVUncgocqJDH7M2mA/exec';
+const VIEWER_URL = '';                          // ลิงก์ App ดูรูป (เว้นว่าง = ปุ่ม "ดูรูป" เปิดโฟลเดอร์ Drive แทน)
+const STAFF = ['คุณหนึ่ง','คุณทรง','คุณเปา','คุณออม','คุณต๊อบ','คุณบอล','คุณซอ'];
+/* ================================================== */
+
+const S = { type:'receive', staff:'', product:[], document:[], last:null, lat:'', lng:'' };
+let pickKind = 'product';
+
+/* ---------- เริ่มต้น ---------- */
+(function init(){
+  const qs = new URLSearchParams(location.search);
+  setType(qs.get('type') === 'issue' ? 'issue' : 'receive');
+  try{ S.staff = localStorage.getItem('wh_staff') || ''; }catch(e){}
+  renderStaff();
+  if (navigator.geolocation) navigator.geolocation.getCurrentPosition(
+    p => { S.lat = p.coords.latitude.toFixed(6); S.lng = p.coords.longitude.toFixed(6); }, () => {}, { timeout:5000 });
+
+  liff.init({ liffId: LIFF_ID })
+    .then(() => {
+      if (!liff.isLoggedIn()) return liff.login();
+      msg('พร้อมใช้งาน'); document.getElementById('btnSend').disabled = false;
+    })
+    .catch(e => msg('เชื่อมต่อ LINE ไม่สำเร็จ: ' + e.message, true));
+})();
+
+function setType(t){
+  S.type = t;
+  document.body.classList.toggle('issue', t === 'issue');
+  document.getElementById('title').textContent = t === 'issue' ? 'ขาจ่าย · จ่ายสินค้าออก' : 'ขารับ · รับสินค้าเข้า';
+  document.getElementById('tReceive').classList.toggle('on', t === 'receive');
+  document.getElementById('tIssue').classList.toggle('on', t === 'issue');
+}
+
+function renderStaff(){
+  const box = document.getElementById('staffChips'); box.innerHTML = '';
+  STAFF.forEach(n => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (S.staff === n ? ' on' : ''); b.textContent = n;
+    b.onclick = () => { S.staff = n; try{ localStorage.setItem('wh_staff', n); }catch(e){} renderStaff(); };
+    box.appendChild(b);
+  });
+}
+
+/* ---------- ถ่าย / เลือกรูป ---------- */
+function pick(kind, camera){
+  pickKind = kind;
+  document.getElementById(camera ? 'fileCam' : 'fileLib').click();
+}
+['fileCam','fileLib'].forEach(id => document.getElementById(id).addEventListener('change', e => {
+  [...e.target.files].forEach(f => S[pickKind].push({ file:f, url:URL.createObjectURL(f) }));
+  e.target.value = ''; renderThumbs(pickKind);
+}));
+
+function renderThumbs(kind){
+  const key = kind === 'product' ? 'Product' : 'Document';
+  const box = document.getElementById('th' + key); box.innerHTML = '';
+  S[kind].forEach((it, i) => {
+    const d = document.createElement('div'); d.className = 'th';
+    d.innerHTML = '<img src="' + it.url + '"><button aria-label="ลบ">×</button>';
+    d.querySelector('button').onclick = () => { URL.revokeObjectURL(it.url); S[kind].splice(i,1); renderThumbs(kind); };
+    box.appendChild(d);
+  });
+  document.getElementById('cnt' + key).textContent = S[kind].length ? '(' + S[kind].length + ' รูป)' : '';
+}
+
+/* ---------- ย่อรูป + ลายน้ำ (สูตรเดียวกับ app เดิม) ---------- */
+function loadImg(url){ return new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; }); }
+async function processImage(url, maxSide, text){
+  const img = await loadImg(url);
+  const r = Math.max(img.width, img.height) / maxSide;
+  const w = r > 1 ? Math.round(img.width / r) : img.width, h = r > 1 ? Math.round(img.height / r) : img.height;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
+  ctx.save(); ctx.globalAlpha = .75;
+  const pad = Math.round(h * .02), fs = Math.max(12, Math.round(h * .03));
+  ctx.font = fs + 'px system-ui, -apple-system, "Noto Sans Thai", sans-serif';
+  const lines = text.split('\n'); let y = h - pad - (lines.length - 1) * (fs + 4);
+  lines.forEach(line => {
+    const tw = ctx.measureText(line).width, x = w - pad - tw;
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(x - 6, y - fs - 4, tw + 12, fs + 10);
+    ctx.fillStyle = '#fff'; ctx.fillText(line, x, y); y += fs + 6;
+  });
+  ctx.restore();
+  return c.toDataURL('image/jpeg', .82);
+}
+
+/* ---------- บันทึก ---------- */
+async function submitAll(){
+  const docNo = document.getElementById('docNo').value.trim().toUpperCase();
+  if (!S.staff) return msg('กรุณาเลือกพนักงาน', true);
+  if (!docNo)   return msg('กรุณากรอกเลขที่เอกสาร', true);
+  if (!S.product.length && !S.document.length) return msg('กรุณาถ่ายรูปอย่างน้อย 1 รูป', true);
+
+  const btn = document.getElementById('btnSend'); btn.disabled = true;
+  try{
+    const now = new Date();
+    const mode = S.type === 'receive' ? 'รับสินค้า' : 'จ่ายสินค้า';
+    const base = mode + '\nพนักงาน: ' + S.staff + '\nเลขที่: ' + docNo + '\nเวลา(เครื่อง): ' + now.toLocaleString('th-TH');
+    const images = [];
+    let n = 0, total = S.product.length + S.document.length;
+    for (const it of S.product){ msg('กำลังเตรียมรูป ' + (++n) + '/' + total);
+      images.push({ label:'product_' + n, dataUrl: await processImage(it.url, 1280, 'สินค้า\n' + base) }); }
+    for (const it of S.document){ msg('กำลังเตรียมรูป ' + (++n) + '/' + total);
+      images.push({ label:'document_' + n, dataUrl: await processImage(it.url, 1600, 'เอกสาร\n' + base) }); }
+
+    msg('กำลังอัปโหลด ' + total + ' รูป…');
+    const payload = { type:S.type, staff:S.staff, docNo, lat:S.lat, lng:S.lng, deviceTimeISO: now.toISOString(), images };
+    const res = await fetch(GAS_URL, { method:'POST',
+      body: JSON.stringify({ action:'save', accessToken: liff.getAccessToken(), payload }) }).then(r => r.json());
+    if (!res.ok) throw new Error(res.message || 'บันทึกไม่สำเร็จ');
+
+    S.last = { type:S.type, staff:S.staff, docNo, time: now, nProduct:S.product.length, nDocument:S.document.length, folderUrl: res.folderUrl };
+
+    // บันทึกในกลุ่มคลัง (ห้องที่เปิดหน้านี้มา) — ฟรี
+    try{ if (liff.getContext() && liff.getContext().type !== 'none') await liff.sendMessages([buildCard(S.last)]); }catch(e){}
+
+    showDone();
+    await shareToTeam();
+  }catch(e){
+    msg('ผิดพลาด: ' + e.message, true); btn.disabled = false;
+  }
+}
+
+/* ---------- การ์ดแจ้ง ---------- */
+function buildCard(r){
+  const recv = r.type === 'receive', color = recv ? '#06C755' : '#2563EB';
+  const head = recv ? 'รับสินค้าแล้ว' : 'จ่ายสินค้าแล้ว';
+  const t = r.time.toLocaleString('th-TH', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  const link = VIEWER_URL ? VIEWER_URL + '?doc=' + encodeURIComponent(r.docNo) : r.folderUrl;
+  const row = (k, v, bold) => ({ type:'box', layout:'horizontal', contents:[
+    { type:'text', text:k, size:'sm', color:'#888888', flex:3 },
+    { type:'text', text:v, size:'sm', flex:6, wrap:true, weight: bold ? 'bold' : 'regular' } ]});
+  return {
+    type:'flex', altText: head + ' ' + r.docNo + ' (' + r.staff + ')',
+    contents:{ type:'bubble', size:'kilo',
+      header:{ type:'box', layout:'vertical', backgroundColor:color, paddingAll:'12px',
+        contents:[{ type:'text', text:head, color:'#FFFFFF', weight:'bold', size:'md' }] },
+      body:{ type:'box', layout:'vertical', spacing:'sm', paddingAll:'12px', contents:[
+        row('เลขที่', r.docNo, true), row('พนักงาน', r.staff), row('เวลา', t),
+        row('รูป', 'สินค้า ' + r.nProduct + ' · เอกสาร ' + r.nDocument) ]},
+      footer:{ type:'box', layout:'vertical', contents:[{ type:'button', style:'primary', color:color, height:'sm',
+        action:{ type:'uri', label:'ดูรูป', uri: link } }]}
+    }
+  };
+}
+
+async function shareToTeam(){
+  if (!S.last) return;
+  if (!liff.isApiAvailable('shareTargetPicker')) return msg('อุปกรณ์นี้ไม่รองรับการเลือกกลุ่ม', true);
+  try{
+    const r = await liff.shareTargetPicker([buildCard(S.last)]);
+    document.getElementById('doneText').textContent = r ? 'ส่งแจ้งเรียบร้อย' : 'ยังไม่ได้ส่งแจ้ง — กดปุ่มด้านล่างเพื่อส่ง';
+  }catch(e){ document.getElementById('doneText').textContent = 'ส่งแจ้งไม่สำเร็จ: ' + e.message; }
+}
+
+function showDone(){
+  document.getElementById('doneTitle').textContent = 'บันทึก ' + S.last.docNo + ' เรียบร้อย';
+  document.getElementById('doneText').textContent = 'เลือกกลุ่มจัดซื้อ/ขายเพื่อส่งแจ้ง';
+  document.getElementById('done').classList.add('show');
+}
+function newJob(){
+  ['product','document'].forEach(k => { S[k].forEach(it => URL.revokeObjectURL(it.url)); S[k] = []; renderThumbs(k); });
+  document.getElementById('docNo').value = ''; S.last = null;
+  document.getElementById('done').classList.remove('show');
+  document.getElementById('btnSend').disabled = false; msg('พร้อมใช้งาน');
+}
+function msg(t, err){ const m = document.getElementById('msg'); m.textContent = t; m.className = err ? 'err' : ''; }
+</script>
+</body>
+</html>
