@@ -63,6 +63,38 @@
   #done p{ margin:0; color:var(--muted); }
   #done .btn{ width:100%; max-width:320px; }
   .btn.ghost{ background:transparent; color:var(--muted); border:1.5px solid var(--line); }
+
+  /* ===== กล้องต่อเนื่อง ===== */
+  #cam{ position:fixed; inset:0; z-index:60; background:#000; color:#fff; display:none; flex-direction:column; }
+  #cam.show{ display:flex; }
+  .cam-top{ display:flex; align-items:center; gap:10px; padding:calc(10px + env(safe-area-inset-top)) 12px 10px; }
+  .cam-top .info{ flex:1; min-width:0; font-size:14px; line-height:1.3; }
+  .cam-top .info b{ display:block; font-size:16px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cam-top .info span{ color:#b9c2cc; font-size:12px; }
+  .cbtn{ border:none; border-radius:12px; height:40px; padding:0 14px; font:inherit; font-weight:700; background:rgba(255,255,255,.16); color:#fff; }
+  .cbtn.on{ background:#ffd54a; color:#111; }
+  .cam-view{ position:relative; flex:1; min-height:0; overflow:hidden; }
+  .cam-view video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  .cam-flash{ position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; }
+  .cam-flash.go{ animation:camflash .25s ease-out; }
+  @keyframes camflash{ 0%{opacity:.85} 100%{opacity:0} }
+  .cam-msg{ position:absolute; left:12px; right:12px; top:12px; text-align:center; font-size:14px; background:rgba(0,0,0,.6); border-radius:12px; padding:10px; }
+  .cam-msg:empty{ display:none; }
+  .cam-strip{ display:flex; gap:6px; overflow-x:auto; padding:8px 12px; min-height:68px; scrollbar-width:none; }
+  .cam-strip::-webkit-scrollbar{ display:none; }
+  .cam-strip .t{ position:relative; flex:0 0 52px; height:52px; border-radius:8px; overflow:hidden; background:#222; }
+  .cam-strip .t img{ width:100%; height:100%; object-fit:cover; }
+  .cam-strip .t i{ position:absolute; left:2px; bottom:2px; font-style:normal; font-size:10px; padding:0 4px; border-radius:6px; background:rgba(0,0,0,.65); }
+  .cam-strip .t i.ok{ background:#06c755; } .cam-strip .t i.err{ background:#c62828; }
+  .cam-strip .t button{ position:absolute; top:1px; right:1px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(0,0,0,.7); color:#fff; font-size:12px; line-height:20px; padding:0; }
+  .cam-kinds{ display:flex; gap:8px; justify-content:center; padding:4px 12px 8px; }
+  .cam-kinds button{ flex:1; max-width:170px; height:40px; border-radius:99px; border:1.5px solid rgba(255,255,255,.4); background:transparent; color:#fff; font:inherit; font-weight:700; }
+  .cam-kinds button.on{ background:#fff; color:#111; border-color:#fff; }
+  .cam-bot{ display:grid; grid-template-columns:1fr auto 1fr; align-items:center; padding:6px 20px calc(16px + env(safe-area-inset-bottom)); }
+  .shutter{ width:76px; height:76px; border-radius:50%; border:5px solid #fff; background:rgba(255,255,255,.25); padding:0; }
+  .shutter:active{ background:#fff; transform:scale(.94); }
+  .cam-bot .left{ justify-self:start; } .cam-bot .right{ justify-self:end; }
+  .cbtn.done{ background:#06c755; height:48px; padding:0 18px; font-size:16px; }
 </style>
 </head>
 <body>
@@ -117,6 +149,29 @@
   <button class="btn send" onclick="shareToTeam()">ส่งแจ้งไปกลุ่มจัดซื้อ/ขาย</button>
   <button class="btn ghost" onclick="newJob()">ถ่ายรายการใหม่</button>
   <button class="btn ghost" onclick="liff.closeWindow()">ปิด</button>
+</div>
+
+
+<div id="cam" aria-label="กล้องถ่ายต่อเนื่อง">
+  <div class="cam-top">
+    <div class="info"><b id="camDoc"></b><span id="camStaff"></span></div>
+    <button class="cbtn" id="camTorch" hidden onclick="toggleTorch()">ไฟฉาย</button>
+  </div>
+  <div class="cam-view">
+    <video id="camVideo" playsinline muted autoplay></video>
+    <div class="cam-flash" id="camFlash"></div>
+    <div class="cam-msg" id="camMsg"></div>
+  </div>
+  <div class="cam-strip" id="camStrip"></div>
+  <div class="cam-kinds">
+    <button id="ckProduct" onclick="setCamKind('product')">สินค้า</button>
+    <button id="ckDocument" onclick="setCamKind('document')">เอกสาร</button>
+  </div>
+  <div class="cam-bot">
+    <button class="cbtn left" onclick="nativeFromCam()">กล้องเครื่อง</button>
+    <button class="shutter" id="camShutter" aria-label="ถ่ายรูป" onclick="snap()"></button>
+    <button class="cbtn done right" onclick="closeCam()">เสร็จ ✓</button>
+  </div>
 </div>
 
 <input id="fileCam" type="file" accept="image/*" capture="environment">
@@ -186,6 +241,7 @@ function pick(kind, camera){
   if (!S.staff)     return msg('เลือกชื่อพนักงานก่อนถ่ายรูป', true);
   if (!docNoVal())  return msg('กรอกเลขที่เอกสารก่อนถ่ายรูป', true);
   pickKind = kind;
+  if (camera && !S.noLiveCam && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) return openCam(kind);
   document.getElementById(camera ? 'fileCam' : 'fileLib').click();
 }
 ['fileCam','fileLib'].forEach(id => document.getElementById(id).addEventListener('change', e => {
@@ -213,7 +269,7 @@ function renderThumbs(kind){
     box.appendChild(d);
   });
   document.getElementById('cnt' + key).textContent = S[kind].length ? '(' + S[kind].length + ' รูป)' : '';
-  updateMsg();
+  updateMsg(); renderCamStrip();
 }
 
 function removePhoto(kind, i){
@@ -355,6 +411,102 @@ function newJob(){
   document.getElementById('done').classList.remove('show'); setLock();
   document.getElementById('btnSend').disabled = false; msg('พร้อมใช้งาน');
 }
+
+/* ===================== กล้องถ่ายต่อเนื่อง ===================== */
+let camStream = null, camTrack = null, torchOn = false, wakeLock = null;
+
+async function openCam(kind){
+  setCamKind(kind);
+  document.getElementById('camDoc').textContent = docNoVal() + ' · ' + (S.type === 'issue' ? 'ขาจ่าย' : 'ขารับ');
+  document.getElementById('camStaff').textContent = 'พนักงาน: ' + S.staff;
+  document.getElementById('cam').classList.add('show');
+  camMsg('กำลังเปิดกล้อง…');
+  renderCamStrip();
+  try{
+    camStream = await navigator.mediaDevices.getUserMedia({ audio:false,
+      video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 } } });
+    const v = document.getElementById('camVideo');
+    v.srcObject = camStream; await v.play();
+    camTrack = camStream.getVideoTracks()[0];
+    const caps = camTrack.getCapabilities ? camTrack.getCapabilities() : {};
+    document.getElementById('camTorch').hidden = !caps.torch;
+    camMsg('');
+    try{ wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
+  }catch(e){
+    S.noLiveCam = true;
+    camMsg('เปิดกล้องต่อเนื่องไม่ได้ (' + (e.name || e.message) + ') — กดปุ่ม "กล้องเครื่อง" ด้านล่างแทน');
+  }
+}
+
+function setCamKind(kind){
+  pickKind = kind;
+  document.getElementById('ckProduct').classList.toggle('on', kind === 'product');
+  document.getElementById('ckDocument').classList.toggle('on', kind === 'document');
+  renderCamStrip();
+}
+
+function snap(){
+  const v = document.getElementById('camVideo');
+  if (!camStream || !v.videoWidth) return;
+  const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  const f = document.getElementById('camFlash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+  try{ navigator.vibrate && navigator.vibrate(30); }catch(e){}
+  const kind = pickKind, shot = new Date();
+  c.toBlob(b => {
+    if (!b) return;
+    if (!S.jobISO) S.jobISO = new Date().toISOString();
+    const it = { kind, index: ++S.counter[kind], url: URL.createObjectURL(b), shot, status:'wait', fileId:'' };
+    S[kind].push(it); queue.push(it);
+    renderThumbs(kind); setLock(); pump();
+  }, 'image/jpeg', 0.92);
+}
+
+function renderCamStrip(){
+  const box = document.getElementById('camStrip');
+  if (!box || !document.getElementById('cam').classList.contains('show')) return;
+  box.innerHTML = '';
+  const all = [...S.product, ...S.document].sort((a, b) => a.shot - b.shot);
+  all.forEach(it => {
+    const d = document.createElement('div'); d.className = 't';
+    const st = it.status === 'ok' ? '<i class="ok">✓</i>' : it.status === 'err' ? '<i class="err">!</i>' : '<i>…</i>';
+    d.innerHTML = '<img src="' + it.url + '">' + st + '<button aria-label="ลบ">×</button>';
+    d.querySelector('button').onclick = () => { const i = S[it.kind].indexOf(it); if (i > -1) removePhoto(it.kind, i); renderCamStrip(); };
+    box.appendChild(d);
+  });
+  box.scrollLeft = box.scrollWidth;
+  document.getElementById('ckProduct').textContent = 'สินค้า' + (S.product.length ? ' (' + S.product.length + ')' : '');
+  document.getElementById('ckDocument').textContent = 'เอกสาร' + (S.document.length ? ' (' + S.document.length + ')' : '');
+}
+
+async function toggleTorch(){
+  if (!camTrack) return;
+  try{ torchOn = !torchOn; await camTrack.applyConstraints({ advanced:[{ torch: torchOn }] });
+       document.getElementById('camTorch').classList.toggle('on', torchOn); }catch(e){ torchOn = false; }
+}
+
+function stopCam(){
+  if (camStream) camStream.getTracks().forEach(t => t.stop());
+  camStream = null; camTrack = null; torchOn = false;
+  document.getElementById('camTorch').classList.remove('on');
+  try{ wakeLock && wakeLock.release(); }catch(e){} wakeLock = null;
+}
+function closeCam(){
+  stopCam();
+  document.getElementById('cam').classList.remove('show');
+  renderThumbs('product'); renderThumbs('document');
+}
+function nativeFromCam(){            // สำรอง: ใช้กล้องของเครื่องทีละรูป
+  stopCam();
+  document.getElementById('cam').classList.remove('show');
+  document.getElementById('fileCam').click();
+}
+function camMsg(t){ document.getElementById('camMsg').textContent = t; }
+document.addEventListener('visibilitychange', () => {   // กลับเข้าแอปแล้วเปิดกล้องใหม่
+  if (document.visibilityState === 'visible' && document.getElementById('cam').classList.contains('show') && !camStream && !S.noLiveCam) openCam(pickKind);
+  if (document.visibilityState === 'hidden') stopCam();
+});
+
 window.addEventListener('DOMContentLoaded', init);
 function msg(t, err){ const m = document.getElementById('msg'); m.textContent = t; m.className = err ? 'err' : ''; }
 </script>
